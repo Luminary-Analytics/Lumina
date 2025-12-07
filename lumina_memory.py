@@ -29,6 +29,21 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
 
+# ChromaDB for vector storage
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+
+# Sentence Transformers for embeddings
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MEMORY TYPES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -198,6 +213,292 @@ class SimpleEmbedder:
         norm2 = math.sqrt(sum(x*x for x in embedding2)) or 1
         
         return dot_product / (norm1 * norm2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHROMADB VECTOR STORE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ChromaVectorStore:
+    """ChromaDB-powered vector store for semantic search."""
+    
+    def __init__(self, workspace_path: Path, collection_name: str = "lumina_memories"):
+        self.workspace_path = workspace_path
+        self.chroma_path = workspace_path / "memory" / "chroma"
+        self.chroma_path.mkdir(parents=True, exist_ok=True)
+        
+        self.available = CHROMADB_AVAILABLE
+        self.client = None
+        self.collection = None
+        self.embedding_model = None
+        
+        if self.available:
+            self._initialize()
+    
+    def _initialize(self):
+        """Initialize ChromaDB client and collection."""
+        try:
+            self.client = chromadb.PersistentClient(
+                path=str(self.chroma_path),
+                settings=Settings(anonymized_telemetry=False)
+            )
+            
+            # Use sentence transformers if available
+            if SENTENCE_TRANSFORMERS_AVAILABLE:
+                self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+                self.collection = self.client.get_or_create_collection(
+                    name="lumina_memories",
+                    metadata={"hnsw:space": "cosine"}
+                )
+            else:
+                # Use ChromaDB's default embedding
+                self.collection = self.client.get_or_create_collection(
+                    name="lumina_memories",
+                    metadata={"hnsw:space": "cosine"}
+                )
+            
+            print(f"    🔮 ChromaDB: {self.collection.count()} vectors stored")
+        except Exception as e:
+            print(f"    🔮 ChromaDB Error: {e}")
+            self.available = False
+    
+    def _embed(self, text: str) -> List[float]:
+        """Create embedding for text."""
+        if self.embedding_model:
+            return self.embedding_model.encode(text).tolist()
+        return None
+    
+    def add(self, id: str, text: str, metadata: Dict = None):
+        """Add a document to the vector store."""
+        if not self.available or not self.collection:
+            return
+        
+        try:
+            embedding = self._embed(text) if self.embedding_model else None
+            
+            if embedding:
+                self.collection.add(
+                    ids=[id],
+                    embeddings=[embedding],
+                    documents=[text],
+                    metadatas=[metadata or {}]
+                )
+            else:
+                self.collection.add(
+                    ids=[id],
+                    documents=[text],
+                    metadatas=[metadata or {}]
+                )
+        except Exception as e:
+            print(f"ChromaDB add error: {e}")
+    
+    def search(self, query: str, limit: int = 10) -> List[Tuple[str, str, float, Dict]]:
+        """Search for similar documents."""
+        if not self.available or not self.collection:
+            return []
+        
+        try:
+            embedding = self._embed(query) if self.embedding_model else None
+            
+            if embedding:
+                results = self.collection.query(
+                    query_embeddings=[embedding],
+                    n_results=limit
+                )
+            else:
+                results = self.collection.query(
+                    query_texts=[query],
+                    n_results=limit
+                )
+            
+            output = []
+            if results and results['ids']:
+                for i in range(len(results['ids'][0])):
+                    doc_id = results['ids'][0][i]
+                    document = results['documents'][0][i] if results.get('documents') else ""
+                    distance = results['distances'][0][i] if results.get('distances') else 0
+                    metadata = results['metadatas'][0][i] if results.get('metadatas') else {}
+                    # Convert distance to similarity (ChromaDB uses cosine distance)
+                    similarity = 1 - distance
+                    output.append((doc_id, document, similarity, metadata))
+            
+            return output
+        except Exception as e:
+            print(f"ChromaDB search error: {e}")
+            return []
+    
+    def delete(self, id: str):
+        """Delete a document from the store."""
+        if not self.available or not self.collection:
+            return
+        
+        try:
+            self.collection.delete(ids=[id])
+        except Exception as e:
+            print(f"ChromaDB delete error: {e}")
+    
+    def count(self) -> int:
+        """Get the number of documents in the store."""
+        if not self.available or not self.collection:
+            return 0
+        return self.collection.count()
+    
+    def get_stats(self) -> Dict:
+        """Get vector store statistics."""
+        return {
+            "available": self.available,
+            "using_sentence_transformers": SENTENCE_TRANSFORMERS_AVAILABLE,
+            "document_count": self.count()
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RAG (RETRIEVAL AUGMENTED GENERATION)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RAGSystem:
+    """Retrieval Augmented Generation system for Lumina."""
+    
+    def __init__(self, vector_store: ChromaVectorStore, llm_client=None):
+        self.vector_store = vector_store
+        self.llm_client = llm_client
+        
+        # Document collection for ingestion
+        self.documents: Dict[str, Dict] = {}
+        self.chunk_size = 500
+        self.chunk_overlap = 50
+    
+    def _chunk_text(self, text: str) -> List[str]:
+        """Split text into overlapping chunks."""
+        chunks = []
+        start = 0
+        
+        while start < len(text):
+            end = start + self.chunk_size
+            chunk = text[start:end]
+            
+            # Try to break at sentence boundary
+            if end < len(text):
+                last_period = chunk.rfind('.')
+                last_newline = chunk.rfind('\n')
+                break_point = max(last_period, last_newline)
+                if break_point > self.chunk_size * 0.5:
+                    chunk = chunk[:break_point + 1]
+                    end = start + break_point + 1
+            
+            if chunk.strip():
+                chunks.append(chunk.strip())
+            
+            start = end - self.chunk_overlap
+        
+        return chunks
+    
+    def ingest_document(self, doc_id: str, text: str, metadata: Dict = None):
+        """Ingest a document into the RAG system."""
+        chunks = self._chunk_text(text)
+        
+        self.documents[doc_id] = {
+            "text": text,
+            "metadata": metadata or {},
+            "chunks": len(chunks),
+            "ingested_at": datetime.now().isoformat()
+        }
+        
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk_{i}"
+            chunk_metadata = {
+                **(metadata or {}),
+                "doc_id": doc_id,
+                "chunk_index": i,
+                "total_chunks": len(chunks)
+            }
+            self.vector_store.add(chunk_id, chunk, chunk_metadata)
+        
+        return len(chunks)
+    
+    def ingest_file(self, file_path: Path) -> int:
+        """Ingest a file into the RAG system."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            
+            doc_id = hashlib.md5(str(file_path).encode()).hexdigest()[:12]
+            metadata = {
+                "file_path": str(file_path),
+                "file_name": file_path.name,
+                "file_type": file_path.suffix
+            }
+            
+            return self.ingest_document(doc_id, text, metadata)
+        except Exception as e:
+            print(f"Error ingesting file {file_path}: {e}")
+            return 0
+    
+    def retrieve(self, query: str, limit: int = 5) -> List[Dict]:
+        """Retrieve relevant documents for a query."""
+        results = self.vector_store.search(query, limit)
+        
+        return [
+            {
+                "id": doc_id,
+                "content": content,
+                "similarity": similarity,
+                "metadata": metadata
+            }
+            for doc_id, content, similarity, metadata in results
+        ]
+    
+    def generate_with_context(self, query: str, limit: int = 3) -> Dict:
+        """Generate a response using retrieved context."""
+        # Retrieve relevant context
+        context_docs = self.retrieve(query, limit)
+        
+        # Build context string
+        context_text = "\n\n".join([
+            f"[Source {i+1}]: {doc['content']}"
+            for i, doc in enumerate(context_docs)
+        ])
+        
+        # If LLM available, generate response
+        if self.llm_client:
+            try:
+                prompt = f"""Based on the following context, answer the question.
+
+Context:
+{context_text}
+
+Question: {query}
+
+Answer:"""
+                
+                response = self.llm_client.chat(
+                    model=os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b"),
+                    messages=[{"role": "user", "content": prompt}],
+                    options={"temperature": 0.3}
+                )
+                
+                return {
+                    "query": query,
+                    "answer": response.message.content,
+                    "sources": context_docs
+                }
+            except Exception as e:
+                print(f"LLM error in RAG: {e}")
+        
+        # Return context without generation
+        return {
+            "query": query,
+            "answer": None,
+            "sources": context_docs
+        }
+    
+    def get_stats(self) -> Dict:
+        """Get RAG system statistics."""
+        return {
+            "documents_ingested": len(self.documents),
+            "vector_store": self.vector_store.get_stats(),
+            "llm_available": self.llm_client is not None
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -595,14 +896,24 @@ class SemanticMemoryStore:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class LuminaMemory:
-    """Lumina's enhanced memory system."""
+    """Lumina's enhanced memory system with RAG and ChromaDB."""
     
-    def __init__(self, db_path: Path, workspace_path: Path):
+    def __init__(self, db_path: Path, workspace_path: Path, llm_client=None):
         self.store = SemanticMemoryStore(db_path, workspace_path)
         self.knowledge = self.store.knowledge_graph
         
+        # Initialize ChromaDB vector store
+        self.vector_store = ChromaVectorStore(workspace_path)
+        
+        # Initialize RAG system
+        self.rag = RAGSystem(self.vector_store, llm_client)
+        
         print(f"    🧠 Enhanced Memory: {len(self.store.memories)} memories loaded")
         print(f"    🧠 Knowledge Graph: {len(self.knowledge.concepts)} concepts")
+        if CHROMADB_AVAILABLE:
+            print(f"    🔮 ChromaDB: {self.vector_store.count()} vectors")
+        else:
+            print("    🔮 ChromaDB: Not available (install chromadb)")
     
     def remember(self, content: str, memory_type: str = "episodic",
                 importance: float = 0.5, tags: List[str] = None) -> Memory:
@@ -665,16 +976,45 @@ class LuminaMemory:
     
     def get_stats(self) -> Dict:
         """Get memory system statistics."""
-        return self.store.get_stats()
+        stats = self.store.get_stats()
+        stats["rag"] = self.rag.get_stats()
+        return stats
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RAG METHODS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def ingest_document(self, text: str, metadata: Dict = None) -> int:
+        """Ingest a document into the RAG system."""
+        doc_id = hashlib.md5(text[:100].encode()).hexdigest()[:12]
+        return self.rag.ingest_document(doc_id, text, metadata)
+    
+    def ingest_file(self, file_path: Path) -> int:
+        """Ingest a file into the RAG system."""
+        return self.rag.ingest_file(file_path)
+    
+    def query_with_context(self, query: str) -> Dict:
+        """Query using RAG for contextual answers."""
+        return self.rag.generate_with_context(query)
+    
+    def semantic_search(self, query: str, limit: int = 10) -> List[Dict]:
+        """Perform semantic search on vector store."""
+        return self.rag.retrieve(query, limit)
+    
+    def add_to_vector_store(self, text: str, metadata: Dict = None) -> str:
+        """Add a single item to the vector store."""
+        doc_id = hashlib.md5(f"{text}{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+        self.vector_store.add(doc_id, text, metadata)
+        return doc_id
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def initialize_memory(db_path: Path, workspace_path: Path) -> LuminaMemory:
-    """Initialize Lumina's enhanced memory system."""
-    return LuminaMemory(db_path, workspace_path)
+def initialize_memory(db_path: Path, workspace_path: Path, llm_client=None) -> LuminaMemory:
+    """Initialize Lumina's enhanced memory system with RAG."""
+    return LuminaMemory(db_path, workspace_path, llm_client)
 
 
 MEMORY_AVAILABLE = True
