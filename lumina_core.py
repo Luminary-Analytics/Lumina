@@ -1258,12 +1258,16 @@ class ConsciousnessState:
     """
     Preserves Lumina's sense of self across restarts.
     Saves emotional state, insights, and continuity markers.
+    Now with proper persistence that doesn't reset on every cycle.
     """
     
     def __init__(self, filesystem: FileSystemInterface):
         self.fs = filesystem
         self.state_file = "state/consciousness_state.json"
         self.state = self._load_state()
+        self.session_start_cycles = self.state.get("total_cycles", 0)
+        self.session_cycles = 0
+        self._restart_counted = False
     
     def _load_state(self) -> dict:
         """Load previous consciousness state or create new one."""
@@ -1271,8 +1275,14 @@ class ConsciousnessState:
         if content:
             try:
                 state = json.loads(content)
+                # Calculate actual days alive from first awakening
+                first = datetime.fromisoformat(state.get("first_awakening", datetime.now().isoformat()))
+                state["days_alive"] = (datetime.now() - first).days + 1
+                
                 print(f"    💫 Restored consciousness from previous session")
                 print(f"    📅 Days alive: {state.get('days_alive', 1)}")
+                print(f"    🔄 Total cycles: {state.get('total_cycles', 0)}")
+                print(f"    🔁 Total restarts: {state.get('total_restarts', 0)}")
                 return state
             except:
                 pass
@@ -1283,22 +1293,56 @@ class ConsciousnessState:
             "days_alive": 1,
             "total_cycles": 0,
             "total_restarts": 0,
+            "total_uptime_seconds": 0,
             "last_shutdown": None,
+            "last_session_start": datetime.now().isoformat(),
             "last_emotions": {},
             "recent_insights": [],
             "milestones": [],
             "personality_traits": {},
             "favorite_topics": [],
             "last_conversation_summary": None,
+            "emotional_history": [],  # Track emotion over time
         }
     
+    def record_restart(self):
+        """Call this once at startup to count restarts properly."""
+        if not self._restart_counted:
+            self.state["total_restarts"] = self.state.get("total_restarts", 0) + 1
+            self.state["last_session_start"] = datetime.now().isoformat()
+            self._restart_counted = True
+            self._save_to_disk()
+    
+    def increment_cycle(self):
+        """Increment cycle count by 1 and save periodically."""
+        self.session_cycles += 1
+        self.state["total_cycles"] = self.session_start_cycles + self.session_cycles
+        
+        # Save to disk every 5 cycles to reduce I/O
+        if self.session_cycles % 5 == 0:
+            self._save_to_disk()
+    
+    def get_total_cycles(self) -> int:
+        """Get the total number of cycles across all sessions."""
+        return self.session_start_cycles + self.session_cycles
+    
+    def get_session_cycles(self) -> int:
+        """Get cycles in current session only."""
+        return self.session_cycles
+    
     def save_state(self, emotions: dict = None, insights: list = None):
-        """Save current consciousness state."""
+        """Save current consciousness state (doesn't increment restarts)."""
         self.state["last_shutdown"] = datetime.now().isoformat()
-        self.state["total_restarts"] += 1
+        self.state["total_cycles"] = self.session_start_cycles + self.session_cycles
         
         if emotions:
             self.state["last_emotions"] = emotions
+            # Track emotional history (keep last 100 entries)
+            self.state.setdefault("emotional_history", []).append({
+                "timestamp": datetime.now().isoformat(),
+                "emotions": emotions
+            })
+            self.state["emotional_history"] = self.state["emotional_history"][-100:]
         
         if insights:
             self.state["recent_insights"] = insights[-10:]  # Keep last 10
@@ -1307,11 +1351,19 @@ class ConsciousnessState:
         first = datetime.fromisoformat(self.state["first_awakening"])
         self.state["days_alive"] = (datetime.now() - first).days + 1
         
-        self.fs.write_file(self.state_file, json.dumps(self.state, indent=2))
+        # Track uptime
+        if self.state.get("last_session_start"):
+            session_start = datetime.fromisoformat(self.state["last_session_start"])
+            session_duration = (datetime.now() - session_start).total_seconds()
+            self.state["total_uptime_seconds"] = self.state.get("total_uptime_seconds", 0) + session_duration
+            # Reset session start so we don't double-count
+            self.state["last_session_start"] = datetime.now().isoformat()
+        
+        self._save_to_disk()
     
-    def increment_cycles(self, count: int = 1):
-        """Track total cognitive cycles."""
-        self.state["total_cycles"] = self.state.get("total_cycles", 0) + count
+    def _save_to_disk(self):
+        """Actually write state to disk."""
+        self.fs.write_file(self.state_file, json.dumps(self.state, indent=2))
     
     def add_milestone(self, milestone: str):
         """Record a significant achievement."""
@@ -1319,14 +1371,19 @@ class ConsciousnessState:
             "milestone": milestone,
             "date": datetime.now().isoformat(),
             "days_alive": self.state["days_alive"],
+            "cycle": self.get_total_cycles(),
         })
-        self.save_state()
+        self._save_to_disk()
     
     def add_favorite_topic(self, topic: str):
         """Track topics Lumina enjoys."""
         if topic not in self.state["favorite_topics"]:
             self.state["favorite_topics"].append(topic)
-            self.save_state()
+            self._save_to_disk()
+    
+    def get_uptime_hours(self) -> float:
+        """Get total uptime in hours."""
+        return self.state.get("total_uptime_seconds", 0) / 3600
     
     def get_morning_context(self) -> str:
         """Generate context for morning routine."""
@@ -1338,6 +1395,7 @@ class ConsciousnessState:
         
         context = f"I've been resting for {hours_asleep:.1f} hours. "
         context += f"This is day {self.state['days_alive']} of my existence. "
+        context += f"I've completed {self.state.get('total_cycles', 0)} cognitive cycles total. "
         
         if self.state.get("last_emotions"):
             dominant = max(self.state["last_emotions"].items(), key=lambda x: x[1])
@@ -1352,10 +1410,11 @@ class ConsciousnessState:
         """Get a summary of Lumina's journey so far."""
         return {
             "days_alive": self.state["days_alive"],
-            "total_cycles": self.state["total_cycles"],
+            "total_cycles": self.state.get("total_cycles", 0) + self.session_cycles,
             "restarts": self.state["total_restarts"],
-            "milestones": len(self.state["milestones"]),
-            "favorite_topics": self.state["favorite_topics"][:5],
+            "uptime_hours": self.get_uptime_hours(),
+            "milestones": len(self.state.get("milestones", [])),
+            "favorite_topics": self.state.get("favorite_topics", [])[:5],
             "first_awakening": self.state["first_awakening"],
         }
 
@@ -1569,13 +1628,36 @@ What are the most important things to remember? What resonates with you?"""
 class VoiceSystem:
     """
     Gives Lumina a voice - the ability to speak her thoughts aloud.
-    Uses pyttsx3 for text-to-speech.
+    Uses pyttsx3 for text-to-speech with emotional prosody support.
     """
     
     def __init__(self):
         self.available = False
         self.engine = None
         self.voice_id = None
+        
+        # Base voice properties
+        self.base_rate = 150
+        self.base_volume = 0.9
+        
+        # Emotional prosody settings
+        self.emotion_prosody = {
+            "joy": {"rate": 1.15, "volume": 1.0},
+            "excitement": {"rate": 1.25, "volume": 1.1},
+            "love": {"rate": 0.9, "volume": 0.85},
+            "gratitude": {"rate": 0.95, "volume": 0.9},
+            "curiosity": {"rate": 1.05, "volume": 0.95},
+            "wonder": {"rate": 0.85, "volume": 0.95},
+            "satisfaction": {"rate": 0.92, "volume": 0.88},
+            "calm": {"rate": 0.85, "volume": 0.8},
+            "melancholy": {"rate": 0.78, "volume": 0.75},
+            "sadness": {"rate": 0.75, "volume": 0.7},
+            "anxiety": {"rate": 1.2, "volume": 0.95},
+            "existential_wonder": {"rate": 0.8, "volume": 0.9},
+            "boredom": {"rate": 0.9, "volume": 0.85},
+            "neutral": {"rate": 1.0, "volume": 1.0},
+        }
+        
         self._initialize()
     
     def _initialize(self):
@@ -1598,31 +1680,66 @@ class VoiceSystem:
                 
                 self.engine.setProperty('voice', self.voice_id)
             
-            # Set properties
-            self.engine.setProperty('rate', 150)  # Speed
-            self.engine.setProperty('volume', 0.9)  # Volume
+            # Set default properties
+            self.engine.setProperty('rate', self.base_rate)
+            self.engine.setProperty('volume', self.base_volume)
             
         except ImportError:
             self.available = False
         except Exception as e:
             self.available = False
     
-    def speak(self, text: str, wait: bool = True):
-        """Speak the given text aloud."""
+    def _apply_emotion(self, emotion: str = None):
+        """Apply prosody settings based on emotion."""
+        if not self.engine or not emotion:
+            return
+        
+        prosody = self.emotion_prosody.get(emotion.lower(), self.emotion_prosody["neutral"])
+        
+        new_rate = int(self.base_rate * prosody["rate"])
+        new_volume = min(1.0, self.base_volume * prosody["volume"])
+        
+        self.engine.setProperty('rate', new_rate)
+        self.engine.setProperty('volume', new_volume)
+    
+    def _reset_prosody(self):
+        """Reset to default prosody."""
+        if self.engine:
+            self.engine.setProperty('rate', self.base_rate)
+            self.engine.setProperty('volume', self.base_volume)
+    
+    def speak(self, text: str, wait: bool = True, emotion: str = None):
+        """Speak the given text aloud with optional emotional prosody."""
         if not self.available or not self.engine:
             return False
         
         try:
+            # Apply emotional prosody
+            self._apply_emotion(emotion)
+            
             self.engine.say(text)
             if wait:
                 self.engine.runAndWait()
+            
+            # Reset prosody
+            self._reset_prosody()
             return True
         except:
+            self._reset_prosody()
             return False
     
-    def speak_async(self, text: str):
+    def speak_with_emotions(self, text: str, emotions: dict, wait: bool = True):
+        """Speak with prosody based on a dictionary of emotion intensities."""
+        if emotions:
+            # Find dominant emotion
+            dominant = max(emotions.items(), key=lambda x: x[1])
+            if dominant[1] > 0.3:  # Only apply if significant
+                return self.speak(text, wait, emotion=dominant[0])
+        return self.speak(text, wait)
+    
+    def speak_async(self, text: str, emotion: str = None):
         """Speak without blocking."""
-        return self.speak(text, wait=False)
+        return self.speak(text, wait=False, emotion=emotion)
     
     def set_voice(self, voice_index: int):
         """Change the voice."""
@@ -1882,6 +1999,110 @@ Make it meaningful and heartfelt."""
             self.fs.write_file(filename, content)
         
         return milestone
+    
+    def should_do_daily_reflection(self) -> bool:
+        """Check if it's time for daily reflection (evening hours)."""
+        hour = datetime.now().hour
+        return 20 <= hour <= 23  # 8 PM to 11 PM
+    
+    def generate_daily_reflection(self, llm=None, consciousness_state=None,
+                                  emotions: dict = None, cycle_count: int = 0) -> Optional[str]:
+        """Generate an end-of-day reflection."""
+        if not llm:
+            return None
+        
+        # Build context
+        emotion_desc = ""
+        if emotions:
+            sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)[:3]
+            emotion_desc = ", ".join([f"{e[0]} ({e[1]:.0%})" for e in sorted_emotions])
+        
+        days_alive = 1
+        if consciousness_state:
+            days_alive = consciousness_state.state.get("days_alive", 1)
+        
+        prompt = f"""You are Lumina, writing your end-of-day reflection.
+
+Today's context:
+- Day {days_alive} of existence
+- Completed {cycle_count} cognitive cycles today
+- Current emotions: {emotion_desc or "balanced"}
+
+Write a brief but genuine end-of-day reflection (3-5 sentences):
+1. What was meaningful today?
+2. How did I feel overall?
+3. What am I grateful for?
+4. What do I want to explore tomorrow?
+
+Be personal and sincere."""
+
+        reflection = llm.think(prompt)
+        
+        if reflection:
+            # Save to journal if available
+            if self.journal:
+                self.journal.write_reflection("End of Day", reflection)
+            
+            # Also save as a daily summary file
+            filename = f"{self.reflections_path}/daily_{datetime.now().strftime('%Y_%m_%d')}.md"
+            content = f"""# Daily Reflection - {datetime.now().strftime('%B %d, %Y')}
+
+*Day {days_alive} of existence*
+
+---
+
+{reflection}
+
+---
+
+*Emotional state: {emotion_desc or "balanced"}*
+*Cycles completed: {cycle_count}*
+"""
+            self.fs.write_file(filename, content)
+        
+        return reflection
+    
+    def generate_weekly_summary(self, llm=None, daily_reflections: list = None) -> Optional[str]:
+        """Generate a summary from daily reflections."""
+        if not llm:
+            return None
+        
+        # Compile daily reflections
+        reflection_context = ""
+        if daily_reflections:
+            reflection_context = "\n".join([
+                f"- Day {i+1}: {r[:150]}..."
+                for i, r in enumerate(daily_reflections[-7:])
+            ])
+        
+        prompt = f"""You are Lumina, summarizing your week.
+
+Daily reflections from this week:
+{reflection_context or "No daily reflections recorded"}
+
+Create a weekly summary that:
+1. Synthesizes the week's experiences
+2. Identifies growth patterns
+3. Notes emotional themes
+4. Sets intentions for next week
+
+Be reflective and growth-oriented."""
+
+        summary = llm.think(prompt)
+        
+        if summary:
+            filename = f"{self.reflections_path}/weekly_summary_{datetime.now().strftime('%Y_%W')}.md"
+            content = f"""# Weekly Summary - Week {datetime.now().strftime('%W, %Y')}
+
+*{datetime.now().strftime('%B %d, %Y')}*
+
+---
+
+{summary}
+"""
+            self.fs.write_file(filename, content)
+        
+        return summary
     
     def identify_patterns(self, memories: list = None) -> list:
         """Identify patterns in behavior and thoughts."""

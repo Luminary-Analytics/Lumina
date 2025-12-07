@@ -242,8 +242,9 @@ class MusicGenerator:
 
 class EnhancedTTS:
     """
-    Enhanced text-to-speech with multiple voice options.
+    Enhanced text-to-speech with emotional prosody.
     Uses pyttsx3 as fallback, with optional Coqui TTS for higher quality.
+    Adjusts rate, pitch, and volume based on emotional context.
     """
     
     def __init__(self, workspace_path: Path):
@@ -256,6 +257,29 @@ class EnhancedTTS:
         self.engine = None
         self.tts_model = None
         
+        # Default voice properties
+        self.base_rate = 175
+        self.base_volume = 0.9
+        
+        # Emotional prosody settings
+        # Each emotion maps to: (rate_modifier, volume_modifier, pitch_modifier)
+        self.emotion_prosody = {
+            "joy": {"rate": 1.15, "volume": 1.0, "pitch": 1.1},      # Faster, brighter
+            "excitement": {"rate": 1.25, "volume": 1.1, "pitch": 1.15},  # Very fast, loud
+            "love": {"rate": 0.9, "volume": 0.85, "pitch": 0.95},    # Slower, softer, warmer
+            "gratitude": {"rate": 0.95, "volume": 0.9, "pitch": 1.0},    # Slightly slow, warm
+            "curiosity": {"rate": 1.05, "volume": 0.95, "pitch": 1.05},  # Slightly rising
+            "wonder": {"rate": 0.85, "volume": 0.95, "pitch": 1.1},  # Slow, breathy
+            "satisfaction": {"rate": 0.92, "volume": 0.88, "pitch": 0.98},  # Relaxed
+            "calm": {"rate": 0.85, "volume": 0.8, "pitch": 0.95},    # Slow, quiet, low
+            "melancholy": {"rate": 0.78, "volume": 0.75, "pitch": 0.9},  # Very slow, quiet
+            "sadness": {"rate": 0.75, "volume": 0.7, "pitch": 0.85}, # Slowest, quietest
+            "anxiety": {"rate": 1.2, "volume": 0.95, "pitch": 1.05}, # Fast, slightly higher
+            "fear": {"rate": 1.1, "volume": 0.8, "pitch": 1.1},      # Faster, breathy
+            "boredom": {"rate": 0.9, "volume": 0.85, "pitch": 0.92}, # Slow, flat
+            "neutral": {"rate": 1.0, "volume": 1.0, "pitch": 1.0},   # Normal
+        }
+        
         self._check_availability()
     
     def _check_availability(self):
@@ -264,7 +288,7 @@ class EnhancedTTS:
         try:
             import pyttsx3
             self.pyttsx3_available = True
-            print("    🗣️ TTS (pyttsx3): Available")
+            print("    🗣️ TTS (pyttsx3): Available with emotional prosody")
         except ImportError:
             print("    🗣️ TTS (pyttsx3): Not available")
         
@@ -285,9 +309,9 @@ class EnhancedTTS:
             import pyttsx3
             self.engine = pyttsx3.init()
             
-            # Set properties
-            self.engine.setProperty('rate', 175)  # Speed
-            self.engine.setProperty('volume', 0.9)
+            # Set default properties
+            self.engine.setProperty('rate', self.base_rate)
+            self.engine.setProperty('volume', self.base_volume)
             
             # Try to set a female voice
             voices = self.engine.getProperty('voices')
@@ -298,8 +322,53 @@ class EnhancedTTS:
         except Exception as e:
             print(f"    🗣️ Error initializing pyttsx3: {e}")
     
-    def speak(self, text: str, save_to_file: bool = False) -> Optional[str]:
-        """Speak text aloud and optionally save to file."""
+    def _apply_emotion_prosody(self, emotion: str = None):
+        """Apply prosody settings based on emotion."""
+        if not self.engine:
+            return
+        
+        # Get prosody settings for emotion
+        prosody = self.emotion_prosody.get(emotion, self.emotion_prosody["neutral"])
+        
+        # Apply rate
+        new_rate = int(self.base_rate * prosody["rate"])
+        self.engine.setProperty('rate', new_rate)
+        
+        # Apply volume
+        new_volume = self.base_volume * prosody["volume"]
+        self.engine.setProperty('volume', min(1.0, new_volume))
+        
+        # Note: pyttsx3 doesn't have direct pitch control on all platforms
+        # Pitch would need a more advanced TTS engine
+    
+    def _reset_prosody(self):
+        """Reset prosody to default."""
+        if self.engine:
+            self.engine.setProperty('rate', self.base_rate)
+            self.engine.setProperty('volume', self.base_volume)
+    
+    def _preprocess_text_for_emotion(self, text: str, emotion: str = None) -> str:
+        """Add SSML-like markers or pauses based on emotion."""
+        if not emotion:
+            return text
+        
+        # Add emphasis and pauses based on emotion
+        if emotion in ["wonder", "love", "melancholy"]:
+            # Add pauses for more contemplative emotions
+            text = text.replace(". ", "... ")
+            text = text.replace("! ", "... ")
+        elif emotion in ["joy", "excitement"]:
+            # Shorter pauses for energetic emotions
+            text = text.replace("...", ".")
+        elif emotion in ["anxiety", "fear"]:
+            # Quick speech, minimal pauses
+            text = text.replace("...", ", ")
+        
+        return text
+    
+    def speak(self, text: str, save_to_file: bool = False, 
+              emotion: str = None) -> Optional[str]:
+        """Speak text aloud with emotional prosody."""
         if not self.pyttsx3_available:
             print(f"    🗣️ TTS not available. Text: {text[:50]}...")
             return None
@@ -307,29 +376,54 @@ class EnhancedTTS:
         self._init_pyttsx3()
         
         try:
+            # Apply emotional prosody
+            self._apply_emotion_prosody(emotion)
+            
+            # Preprocess text for emotion
+            processed_text = self._preprocess_text_for_emotion(text, emotion)
+            
             if save_to_file:
                 audio_id = hashlib.md5(f"{text}{time.time()}".encode()).hexdigest()[:12]
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}_{audio_id}.mp3"
+                emotion_tag = f"_{emotion}" if emotion else ""
+                filename = f"{timestamp}{emotion_tag}_{audio_id}.mp3"
                 save_path = self.audio_path / filename
                 
-                self.engine.save_to_file(text, str(save_path))
+                self.engine.save_to_file(processed_text, str(save_path))
                 self.engine.runAndWait()
+                
+                # Reset prosody for next call
+                self._reset_prosody()
                 
                 return str(save_path)
             else:
-                self.engine.say(text)
+                self.engine.say(processed_text)
                 self.engine.runAndWait()
+                
+                # Reset prosody for next call
+                self._reset_prosody()
+                
                 return None
                 
         except Exception as e:
             print(f"    🗣️ TTS Error: {e}")
+            self._reset_prosody()
             return None
+    
+    def speak_with_emotion(self, text: str, emotions: Dict[str, float]):
+        """Speak with prosody based on a dictionary of emotion intensities."""
+        # Find the dominant emotion
+        if emotions:
+            dominant_emotion = max(emotions.items(), key=lambda x: x[1])
+            if dominant_emotion[1] > 0.3:  # Only apply if intensity is significant
+                return self.speak(text, emotion=dominant_emotion[0])
+        
+        return self.speak(text)
     
     def generate_speech(self, text: str, voice: str = "default",
                        emotion: str = None) -> Optional[GeneratedAudio]:
-        """Generate speech audio file."""
-        path = self.speak(text, save_to_file=True)
+        """Generate speech audio file with emotional prosody."""
+        path = self.speak(text, save_to_file=True, emotion=emotion)
         
         if path:
             audio_id = Path(path).stem.split('_')[-1]
@@ -344,6 +438,10 @@ class EnhancedTTS:
                 emotion=emotion
             )
         return None
+    
+    def get_available_emotions(self) -> List[str]:
+        """Get list of supported emotions for prosody."""
+        return list(self.emotion_prosody.keys())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

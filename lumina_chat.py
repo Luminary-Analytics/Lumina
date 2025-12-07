@@ -271,6 +271,126 @@ class ConversationStore:
         return context
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRIORITY & COMMITMENT SYSTEM (Links chat to consciousness)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PriorityManager:
+    """Manages priorities and commitments that Lumina makes in chat.
+    These are read by consciousness.py to guide the cognitive loop."""
+    
+    def __init__(self, workspace_path: Path):
+        self.priorities_file = workspace_path / "priorities.json"
+        self._ensure_file()
+    
+    def _ensure_file(self):
+        if not self.priorities_file.exists():
+            self.priorities_file.parent.mkdir(parents=True, exist_ok=True)
+            self._save({
+                "current_focus": None,
+                "priorities": [],
+                "commitments": [],
+                "updated_at": None,
+                "updated_by": None
+            })
+    
+    def _load(self) -> dict:
+        try:
+            with open(self.priorities_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {"current_focus": None, "priorities": [], "commitments": [], "updated_at": None}
+    
+    def _save(self, data: dict):
+        data["updated_at"] = datetime.now().isoformat()
+        with open(self.priorities_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+    
+    def set_focus(self, focus: str, reason: str = None):
+        """Set Lumina's current focus area."""
+        data = self._load()
+        data["current_focus"] = {
+            "area": focus,
+            "reason": reason,
+            "set_at": datetime.now().isoformat(),
+            "source": "chat_with_richard"
+        }
+        data["updated_by"] = "chat"
+        self._save(data)
+    
+    def add_priority(self, priority: str, urgency: int = 5):
+        """Add a priority (1-10 urgency)."""
+        data = self._load()
+        data["priorities"].append({
+            "task": priority,
+            "urgency": urgency,
+            "added_at": datetime.now().isoformat(),
+            "completed": False,
+            "source": "chat_with_richard"
+        })
+        # Keep only recent priorities (max 20)
+        data["priorities"] = data["priorities"][-20:]
+        data["updated_by"] = "chat"
+        self._save(data)
+    
+    def add_commitment(self, commitment: str):
+        """Add something Lumina committed to doing."""
+        data = self._load()
+        data["commitments"].append({
+            "what": commitment,
+            "committed_at": datetime.now().isoformat(),
+            "fulfilled": False,
+            "source": "chat_with_richard"
+        })
+        data["commitments"] = data["commitments"][-10:]
+        data["updated_by"] = "chat"
+        self._save(data)
+    
+    def get_priorities(self) -> dict:
+        """Get current priorities for consciousness.py to read."""
+        return self._load()
+
+
+def detect_and_save_priorities(response_text: str, priority_manager: PriorityManager):
+    """Detect when Lumina commits to priorities in her response and save them."""
+    response_lower = response_text.lower()
+    
+    # Detect focus/priority statements
+    focus_phrases = [
+        "i'll prioritize", "i will prioritize", "my priority is",
+        "i'll focus on", "i will focus on", "focusing on",
+        "i want to learn", "i'll learn", "i will learn",
+        "i'm going to work on", "i will work on",
+        "my goal is", "i'm committing to", "i commit to"
+    ]
+    
+    for phrase in focus_phrases:
+        if phrase in response_lower:
+            # Extract what comes after the phrase
+            idx = response_lower.find(phrase)
+            after = response_text[idx + len(phrase):].strip()
+            # Get the rest of the sentence (up to period, newline, or 100 chars)
+            end_idx = min(
+                after.find('.') if after.find('.') > 0 else 100,
+                after.find('\n') if after.find('\n') > 0 else 100,
+                100
+            )
+            focus_area = after[:end_idx].strip()
+            
+            if len(focus_area) > 5:
+                # Determine if it's a focus or commitment
+                if any(p in phrase for p in ["prioritize", "focus"]):
+                    priority_manager.set_focus(focus_area, f"Committed during chat")
+                    print(f"    📌 Saved focus: {focus_area[:50]}...")
+                else:
+                    priority_manager.add_commitment(focus_area)
+                    print(f"    📌 Saved commitment: {focus_area[:50]}...")
+                break
+
+
+# Initialize priority manager
+priority_manager = PriorityManager(WORKSPACE_PATH)
+
 # Initialize store
 conversation_store = ConversationStore(DB_PATH)
 
@@ -1973,6 +2093,9 @@ def chat_stream():
             # Save response
             if conv_id:
                 conversation_store.add_message(conv_id, 'assistant', full_response)
+            
+            # Detect and save any priorities/commitments Lumina made
+            detect_and_save_priorities(full_response, priority_manager)
             
             yield f"data: {json.dumps({'done': True})}\n\n"
             

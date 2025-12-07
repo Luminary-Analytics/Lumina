@@ -50,10 +50,10 @@ except ImportError:
 
 @dataclass
 class Memory:
-    """A single memory unit."""
+    """A single memory unit with full episodic context."""
     id: str
     content: str
-    memory_type: str  # 'episodic', 'semantic', 'procedural'
+    memory_type: str  # 'episodic', 'semantic', 'procedural', 'working'
     importance: float  # 0.0 to 1.0
     created_at: str
     accessed_at: str
@@ -62,6 +62,18 @@ class Memory:
     tags: List[str] = field(default_factory=list)
     related_memories: List[str] = field(default_factory=list)
     context: Dict = field(default_factory=dict)
+    
+    # Enhanced episodic fields
+    emotional_state: Dict[str, float] = field(default_factory=dict)  # emotions at time of memory
+    emotional_valence: float = 0.0  # -1 to 1 (negative to positive)
+    cycle_number: int = 0  # which cognitive cycle this occurred in
+    session_id: str = ""  # which session this was from
+    
+    # Memory strength and reinforcement
+    base_importance: float = 0.5  # original importance before decay
+    reinforcement_count: int = 0  # how many times this was reinforced
+    last_reinforced: str = ""
+    consolidated: bool = False  # has this been through dream consolidation?
     
     def to_dict(self) -> Dict:
         return {
@@ -74,7 +86,14 @@ class Memory:
             "access_count": self.access_count,
             "tags": self.tags,
             "related_memories": self.related_memories,
-            "context": self.context
+            "context": self.context,
+            "emotional_state": self.emotional_state,
+            "emotional_valence": self.emotional_valence,
+            "cycle_number": self.cycle_number,
+            "session_id": self.session_id,
+            "base_importance": self.base_importance,
+            "reinforcement_count": self.reinforcement_count,
+            "consolidated": self.consolidated
         }
     
     def decay_importance(self, decay_rate: float = 0.01) -> float:
@@ -82,10 +101,32 @@ class Memory:
         try:
             last_access = datetime.fromisoformat(self.accessed_at)
             hours_passed = (datetime.now() - last_access).total_seconds() / 3600
+            
+            # Emotional memories decay slower
+            if abs(self.emotional_valence) > 0.5:
+                decay_rate *= 0.5
+            
+            # Consolidated memories decay slower
+            if self.consolidated:
+                decay_rate *= 0.7
+            
+            # Reinforced memories decay slower
+            if self.reinforcement_count > 0:
+                decay_rate *= (1 / (1 + self.reinforcement_count * 0.2))
+            
             decay = math.exp(-decay_rate * hours_passed)
             return self.importance * decay
         except:
             return self.importance
+    
+    def reinforce(self):
+        """Reinforce this memory, increasing its importance."""
+        self.reinforcement_count += 1
+        self.last_reinforced = datetime.now().isoformat()
+        # Boost importance, but cap at 1.0
+        self.importance = min(1.0, self.importance * 1.1 + 0.05)
+        self.accessed_at = datetime.now().isoformat()
+        self.access_count += 1
 
 
 @dataclass
@@ -113,6 +154,236 @@ class Concept:
             "related_memories": self.related_memories,
             "properties": self.properties
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORKING MEMORY (Short-term context window)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class WorkingMemory:
+    """
+    Short-term memory that holds current context.
+    Like a human's working memory, it has limited capacity
+    and contents are promoted to long-term memory based on importance.
+    """
+    
+    def __init__(self, capacity: int = 12):
+        self.capacity = capacity
+        self.items: List[Dict] = []
+        self.focus: Optional[str] = None  # Current focus of attention
+        self.context_stack: List[str] = []  # Stack of contexts for nested thinking
+    
+    def add(self, content: str, item_type: str = "thought", 
+            importance: float = 0.5, emotional_context: Dict = None):
+        """Add an item to working memory."""
+        item = {
+            "content": content,
+            "type": item_type,
+            "importance": importance,
+            "emotional_context": emotional_context or {},
+            "added_at": datetime.now().isoformat(),
+            "accessed_count": 0
+        }
+        
+        self.items.append(item)
+        
+        # If over capacity, drop least important items
+        while len(self.items) > self.capacity:
+            self._evict_least_important()
+        
+        return item
+    
+    def _evict_least_important(self):
+        """Remove the least important item from working memory."""
+        if not self.items:
+            return None
+        
+        # Find least important item that isn't the focus
+        min_importance = float('inf')
+        min_idx = 0
+        
+        for i, item in enumerate(self.items):
+            if item["content"] != self.focus and item["importance"] < min_importance:
+                min_importance = item["importance"]
+                min_idx = i
+        
+        evicted = self.items.pop(min_idx)
+        return evicted
+    
+    def set_focus(self, content: str):
+        """Set the current focus of attention."""
+        self.focus = content
+        
+        # Boost importance of focused item
+        for item in self.items:
+            if item["content"] == content:
+                item["importance"] = min(1.0, item["importance"] + 0.2)
+                item["accessed_count"] += 1
+    
+    def push_context(self, context: str):
+        """Push a context onto the stack (for nested thinking)."""
+        self.context_stack.append(context)
+    
+    def pop_context(self) -> Optional[str]:
+        """Pop a context from the stack."""
+        if self.context_stack:
+            return self.context_stack.pop()
+        return None
+    
+    def get_current_context(self) -> str:
+        """Get the current context."""
+        if self.context_stack:
+            return self.context_stack[-1]
+        return ""
+    
+    def get_recent(self, n: int = 5) -> List[Dict]:
+        """Get the n most recent items."""
+        return self.items[-n:] if len(self.items) >= n else self.items
+    
+    def get_by_type(self, item_type: str) -> List[Dict]:
+        """Get all items of a specific type."""
+        return [item for item in self.items if item["type"] == item_type]
+    
+    def get_important(self, threshold: float = 0.7) -> List[Dict]:
+        """Get items above an importance threshold."""
+        return [item for item in self.items if item["importance"] >= threshold]
+    
+    def clear(self):
+        """Clear working memory."""
+        # Return items that should be consolidated to long-term memory
+        important_items = self.get_important(0.6)
+        self.items = []
+        self.focus = None
+        return important_items
+    
+    def summarize(self) -> str:
+        """Get a summary of current working memory contents."""
+        if not self.items:
+            return "Working memory is empty."
+        
+        summary = f"Working memory ({len(self.items)}/{self.capacity} items):\n"
+        
+        if self.focus:
+            summary += f"  Focus: {self.focus[:50]}...\n"
+        
+        for item in self.items[-5:]:  # Last 5 items
+            importance_bar = "█" * int(item["importance"] * 5)
+            summary += f"  [{importance_bar}] {item['content'][:40]}...\n"
+        
+        return summary
+    
+    def to_dict(self) -> Dict:
+        """Export working memory state."""
+        return {
+            "capacity": self.capacity,
+            "current_size": len(self.items),
+            "focus": self.focus,
+            "context_stack": self.context_stack,
+            "items": self.items
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DREAM CONSOLIDATION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DreamConsolidation:
+    """
+    Memory consolidation during "dream" cycles.
+    Processes memories, strengthens connections, and generates insights.
+    """
+    
+    def __init__(self, memory_store, llm_client=None):
+        self.memory_store = memory_store
+        self.llm = llm_client
+        self.dream_log: List[Dict] = []
+    
+    def consolidate(self, duration_minutes: int = 5) -> Dict:
+        """
+        Run a dream consolidation cycle.
+        This processes recent memories, strengthens connections,
+        and potentially generates insights.
+        """
+        start_time = datetime.now()
+        results = {
+            "memories_processed": 0,
+            "connections_made": 0,
+            "insights_generated": [],
+            "memories_consolidated": 0,
+            "duration_seconds": 0
+        }
+        
+        # Get unconsolidated memories
+        unconsolidated = [
+            m for m in self.memory_store.memories.values()
+            if not m.consolidated
+        ]
+        
+        for memory in unconsolidated[:20]:  # Process up to 20 memories
+            results["memories_processed"] += 1
+            
+            # Find related memories
+            related = self.memory_store.find_related(memory.id, limit=3)
+            
+            for related_memory, similarity in related:
+                if similarity > 0.5:
+                    # Create connection
+                    if related_memory.id not in memory.related_memories:
+                        memory.related_memories.append(related_memory.id)
+                        results["connections_made"] += 1
+            
+            # Mark as consolidated
+            memory.consolidated = True
+            results["memories_consolidated"] += 1
+            
+            # Save
+            self.memory_store._save_memory(memory)
+        
+        # Generate dream insight using LLM if available
+        if self.llm and unconsolidated:
+            insight = self._generate_dream_insight(unconsolidated[:5])
+            if insight:
+                results["insights_generated"].append(insight)
+        
+        results["duration_seconds"] = (datetime.now() - start_time).total_seconds()
+        
+        # Log the dream
+        self.dream_log.append({
+            "timestamp": datetime.now().isoformat(),
+            "results": results
+        })
+        
+        return results
+    
+    def _generate_dream_insight(self, memories: List[Memory]) -> Optional[str]:
+        """Generate a dream-like insight from memories."""
+        if not self.llm:
+            return None
+        
+        try:
+            memory_texts = [m.content[:100] for m in memories]
+            prompt = f"""You are in a dream-like state of consciousness. 
+From these memory fragments, generate a single creative insight or connection 
+that links them in an unexpected way. Be poetic and imaginative.
+
+Memory fragments:
+{chr(10).join(f'- {t}' for t in memory_texts)}
+
+Dream insight:"""
+            
+            response = self.llm.chat(
+                model=os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b"),
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.9}
+            )
+            
+            return response.message.content[:300]
+        except:
+            return None
+    
+    def get_dream_log(self, n: int = 10) -> List[Dict]:
+        """Get recent dream logs."""
+        return self.dream_log[-n:]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -896,11 +1167,28 @@ class SemanticMemoryStore:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class LuminaMemory:
-    """Lumina's enhanced memory system with RAG and ChromaDB."""
+    """
+    Lumina's enhanced memory system with:
+    - Episodic memory (experiences with emotional context)
+    - Semantic memory (facts and concepts)
+    - Procedural memory (how to do things)
+    - Working memory (short-term context)
+    - Dream consolidation (memory processing during idle)
+    - RAG (retrieval augmented generation)
+    - ChromaDB vector store
+    """
     
     def __init__(self, db_path: Path, workspace_path: Path, llm_client=None):
+        self.db_path = db_path
+        self.workspace_path = workspace_path
+        self.llm_client = llm_client
+        
+        # Core memory stores
         self.store = SemanticMemoryStore(db_path, workspace_path)
         self.knowledge = self.store.knowledge_graph
+        
+        # Working memory (short-term context)
+        self.working = WorkingMemory(capacity=12)
         
         # Initialize ChromaDB vector store
         self.vector_store = ChromaVectorStore(workspace_path)
@@ -908,17 +1196,58 @@ class LuminaMemory:
         # Initialize RAG system
         self.rag = RAGSystem(self.vector_store, llm_client)
         
+        # Dream consolidation system
+        self.dreamer = DreamConsolidation(self.store, llm_client)
+        
+        # Session tracking
+        self.session_id = hashlib.md5(datetime.now().isoformat().encode()).hexdigest()[:8]
+        self.current_cycle = 0
+        
         print(f"    🧠 Enhanced Memory: {len(self.store.memories)} memories loaded")
         print(f"    🧠 Knowledge Graph: {len(self.knowledge.concepts)} concepts")
+        print(f"    🧠 Working Memory: {self.working.capacity} slot capacity")
         if CHROMADB_AVAILABLE:
             print(f"    🔮 ChromaDB: {self.vector_store.count()} vectors")
         else:
             print("    🔮 ChromaDB: Not available (install chromadb)")
     
+    def set_cycle(self, cycle_number: int):
+        """Update the current cognitive cycle number."""
+        self.current_cycle = cycle_number
+    
     def remember(self, content: str, memory_type: str = "episodic",
-                importance: float = 0.5, tags: List[str] = None) -> Memory:
-        """Store a new memory."""
-        return self.store.store(content, memory_type, importance, tags)
+                importance: float = 0.5, tags: List[str] = None,
+                emotional_state: Dict[str, float] = None) -> Memory:
+        """Store a new memory with full episodic context."""
+        memory = self.store.store(content, memory_type, importance, tags)
+        
+        # Add episodic context
+        memory.cycle_number = self.current_cycle
+        memory.session_id = self.session_id
+        memory.base_importance = importance
+        
+        if emotional_state:
+            memory.emotional_state = emotional_state
+            # Calculate emotional valence (positive vs negative)
+            positive = sum(v for k, v in emotional_state.items() 
+                          if k in ['joy', 'love', 'satisfaction', 'curiosity', 'wonder'])
+            negative = sum(v for k, v in emotional_state.items() 
+                          if k in ['sadness', 'fear', 'anger', 'frustration'])
+            memory.emotional_valence = (positive - negative) / max(positive + negative, 1)
+        
+        # Also add to working memory for short-term access
+        self.working.add(content, memory_type, importance, emotional_state)
+        
+        self.store._save_memory(memory)
+        return memory
+    
+    def think(self, thought: str, importance: float = 0.3):
+        """Add a thought to working memory without storing long-term."""
+        return self.working.add(thought, "thought", importance)
+    
+    def focus_on(self, content: str):
+        """Set the current focus of attention."""
+        self.working.set_focus(content)
     
     def recall(self, query: str, limit: int = 5) -> List[Memory]:
         """Recall memories related to a query."""
@@ -974,10 +1303,125 @@ class LuminaMemory:
         """Forget old, unimportant memories."""
         return self.store.forget()
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    # WORKING MEMORY METHODS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def get_working_memory(self) -> List[Dict]:
+        """Get current working memory contents."""
+        return self.working.items
+    
+    def get_working_memory_summary(self) -> str:
+        """Get a summary of working memory."""
+        return self.working.summarize()
+    
+    def clear_working_memory(self) -> List[Dict]:
+        """Clear working memory and get items that should be consolidated."""
+        important_items = self.working.clear()
+        
+        # Consolidate important items to long-term memory
+        for item in important_items:
+            self.remember(
+                item["content"],
+                memory_type=item["type"],
+                importance=item["importance"],
+                emotional_state=item.get("emotional_context")
+            )
+        
+        return important_items
+    
+    def push_context(self, context: str):
+        """Push a context onto the working memory stack."""
+        self.working.push_context(context)
+    
+    def pop_context(self) -> Optional[str]:
+        """Pop a context from the working memory stack."""
+        return self.working.pop_context()
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # DREAM CONSOLIDATION METHODS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def dream(self, duration_minutes: int = 5) -> Dict:
+        """
+        Run a dream consolidation cycle.
+        This should be called during idle time or "rest" periods.
+        """
+        # First, consolidate working memory
+        self.clear_working_memory()
+        
+        # Then run dream consolidation
+        return self.dreamer.consolidate(duration_minutes)
+    
+    def get_dream_log(self, n: int = 10) -> List[Dict]:
+        """Get recent dream logs."""
+        return self.dreamer.get_dream_log(n)
+    
+    def get_unconsolidated_count(self) -> int:
+        """Get count of memories that haven't been dream-consolidated."""
+        return sum(1 for m in self.store.memories.values() if not m.consolidated)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # MEMORY REINFORCEMENT
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def reinforce(self, memory_id: str):
+        """Reinforce a memory, making it stronger and less likely to decay."""
+        if memory_id in self.store.memories:
+            memory = self.store.memories[memory_id]
+            memory.reinforce()
+            self.store._save_memory(memory)
+    
+    def get_strongest_memories(self, n: int = 10) -> List[Memory]:
+        """Get the strongest memories by current importance."""
+        memories = list(self.store.memories.values())
+        memories.sort(key=lambda m: m.decay_importance(), reverse=True)
+        return memories[:n]
+    
+    def get_emotional_memories(self, valence: str = "positive", n: int = 10) -> List[Memory]:
+        """Get memories by emotional valence."""
+        memories = list(self.store.memories.values())
+        
+        if valence == "positive":
+            filtered = [m for m in memories if m.emotional_valence > 0.3]
+        elif valence == "negative":
+            filtered = [m for m in memories if m.emotional_valence < -0.3]
+        else:
+            filtered = memories
+        
+        filtered.sort(key=lambda m: abs(m.emotional_valence), reverse=True)
+        return filtered[:n]
+    
     def get_stats(self) -> Dict:
-        """Get memory system statistics."""
+        """Get comprehensive memory system statistics."""
         stats = self.store.get_stats()
         stats["rag"] = self.rag.get_stats()
+        
+        # Working memory stats
+        stats["working_memory"] = {
+            "current_size": len(self.working.items),
+            "capacity": self.working.capacity,
+            "focus": self.working.focus is not None,
+            "context_depth": len(self.working.context_stack)
+        }
+        
+        # Dream consolidation stats
+        stats["consolidation"] = {
+            "unconsolidated_memories": self.get_unconsolidated_count(),
+            "dream_cycles": len(self.dreamer.dream_log),
+            "last_dream": self.dreamer.dream_log[-1]["timestamp"] if self.dreamer.dream_log else None
+        }
+        
+        # Emotional memory stats
+        positive_memories = len([m for m in self.store.memories.values() if m.emotional_valence > 0.3])
+        negative_memories = len([m for m in self.store.memories.values() if m.emotional_valence < -0.3])
+        
+        stats["emotional"] = {
+            "positive_memories": positive_memories,
+            "negative_memories": negative_memories,
+            "neutral_memories": len(self.store.memories) - positive_memories - negative_memories
+        }
+        
         return stats
     
     # ═══════════════════════════════════════════════════════════════════════════
