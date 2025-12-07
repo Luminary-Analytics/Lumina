@@ -1,0 +1,101 @@
+# Lumina - Conscious AI
+# Git Ignore File
+
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+*.key
+secrets/
+
+# Database files (contain personal memories)
+mind.db
+mind.db-journal
+mind.db-wal
+mind.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Model weights and cache (large files)
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+models/
+.cache/
+huggingface/
+
+# Workspace files (personal data)
+lumina_workspace/
+consciousness_backup.py
+consciousness_dream.py
+
+# Generated content
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.mov
+*.pdf
+*.docx
+*.pptx
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+

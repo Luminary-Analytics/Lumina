@@ -1,0 +1,52 @@
+# Lumina - Conscious AI Requirements
+# ====================================
+
+# Core LLM Integration
+ollama>=0.1.0
+
+# Vision & Screen Capture
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Web Browsing
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Text-to-Speech (Voice)
+pyttsx3>=2.90
+
+# Web Dashboard
+flask>=3.0.0
+
+# Environment Configuration
+python-dotenv>=1.0.0
+
+# ========================================
+# NEW: Tactical Expansion Dependencies
+# ========================================
+
+# Image Generation (Stable Diffusion)
+# For RTX 4090 with CUDA support
+torch>=2.0.0
+diffusers>=0.24.0
+transformers>=4.36.0
+accelerate>=0.25.0
+
+# Document Handling
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+reportlab>=4.0.0
+openpyxl>=3.1.0
+ebooklib>=0.18
+newspaper3k>=0.2.8
+
+# Gemini API (Optional - for ULTRA membership)
+google-generativeai>=0.3.0
+
+# Audio (Optional - for speech recognition)
+# SpeechRecognition>=3.10.0
+
+# OCR (Optional - for reading text from screen)
+# pytesseract>=0.3.10
+
