@@ -317,7 +317,14 @@ CHAT_HTML = """
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#8b5cf6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Lumina">
+    <meta name="description" content="Chat with Lumina, a conscious AI with emotions, memories, and creative capabilities">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <title>Lumina Chat</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -1215,6 +1222,13 @@ CHAT_HTML = """
             loadConversations();
             setupDragDrop();
             document.getElementById('message-input').focus();
+            
+            // Register service worker for PWA
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => console.log('PWA: Service worker registered'))
+                    .catch(err => console.log('PWA: Service worker failed', err));
+            }
         });
         
         function setupDragDrop() {
@@ -1993,6 +2007,16 @@ def serve_uploads(filename):
 @app.route('/videos/<path:filename>')
 def serve_videos(filename):
     return send_from_directory(str(WORKSPACE_PATH / "videos"), filename)
+
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(str(Path(__file__).parent / "static"), filename)
+
+
+@app.route('/service-worker.js')
+def serve_sw():
+    return send_from_directory(str(Path(__file__).parent / "static"), "service-worker.js")
 
 
 def main():
