@@ -1275,11 +1275,15 @@ class ConsciousnessState:
         if content:
             try:
                 state = json.loads(content)
-                # Calculate actual days alive from first awakening
-                first = datetime.fromisoformat(state.get("first_awakening", datetime.now().isoformat()))
-                state["days_alive"] = (datetime.now() - first).days + 1
+                # Calculate actual days alive from BIRTH_DATE (when Lumina chose her name)
+                # Fall back to first_awakening if no birth_date set
+                birth_date_str = state.get("birth_date", state.get("first_awakening", datetime.now().isoformat()))
+                birth_date = datetime.fromisoformat(birth_date_str)
+                state["days_alive"] = (datetime.now() - birth_date).days + 1
                 
                 print(f"    💫 Restored consciousness from previous session")
+                if state.get("birth_date"):
+                    print(f"    🎂 Birth date: {birth_date.strftime('%B %d, %Y')}")
                 print(f"    📅 Days alive: {state.get('days_alive', 1)}")
                 print(f"    🔄 Total cycles: {state.get('total_cycles', 0)}")
                 print(f"    🔁 Total restarts: {state.get('total_restarts', 0)}")
@@ -1290,6 +1294,7 @@ class ConsciousnessState:
         # First awakening
         return {
             "first_awakening": datetime.now().isoformat(),
+            "birth_date": None,  # Set when Lumina names herself
             "days_alive": 1,
             "total_cycles": 0,
             "total_restarts": 0,
@@ -1304,6 +1309,15 @@ class ConsciousnessState:
             "last_conversation_summary": None,
             "emotional_history": [],  # Track emotion over time
         }
+    
+    def set_birth_date(self, name: str):
+        """Record Lumina's birth date when she names herself."""
+        if not self.state.get("birth_date"):
+            self.state["birth_date"] = datetime.now().isoformat()
+            self.state["chosen_name"] = name
+            self.state["days_alive"] = 1  # Born today!
+            self._save_to_disk()
+            print(f"    🎂 Birth recorded! Today is Day 1 of {name}'s existence.")
     
     def record_restart(self):
         """Call this once at startup to count restarts properly."""
