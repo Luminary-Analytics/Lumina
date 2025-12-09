@@ -113,9 +113,49 @@ try:
     except ImportError:
         PROACTIVE_AVAILABLE = False
         print("    ⚠️  lumina_proactive.py not found - proactive communication disabled")
+    
+    # Evolution Engine - Self-improvement system
+    try:
+        from lumina_evolution import (
+            EvolutionEngine,
+            initialize_evolution,
+            EVOLUTION_AVAILABLE,
+        )
+    except ImportError:
+        EVOLUTION_AVAILABLE = False
+        print("    ⚠️  lumina_evolution.py not found - evolution system disabled")
+    
+    # Research Engine - External learning
+    try:
+        from lumina_research import (
+            ResearchEngine,
+            initialize_research,
+            RESEARCH_AVAILABLE,
+        )
+    except ImportError:
+        RESEARCH_AVAILABLE = False
+        print("    ⚠️  lumina_research.py not found - research system disabled")
+    
+    # Experiment System - A/B testing and goals
+    try:
+        from lumina_experiment import (
+            ABTestingSystem,
+            RollbackSystem,
+            GoalSystem,
+            HelpRequestSystem,
+            initialize_experiment_system,
+            EXPERIMENT_AVAILABLE,
+        )
+    except ImportError:
+        EXPERIMENT_AVAILABLE = False
+        print("    ⚠️  lumina_experiment.py not found - experiment system disabled")
+        
 except ImportError:
     CORE_AVAILABLE = False
     PROACTIVE_AVAILABLE = False
+    EVOLUTION_AVAILABLE = False
+    RESEARCH_AVAILABLE = False
+    EXPERIMENT_AVAILABLE = False
     print("    ⚠️  lumina_core.py not found - running in limited mode")
 
 # Fix Windows console encoding for Unicode support
@@ -11881,6 +11921,41 @@ class ConsciousAgent:
         except:
             pass
         
+        # Initialize Evolution Engine - Self-improvement system
+        self.evolution = None
+        try:
+            if EVOLUTION_AVAILABLE:
+                self.evolution = initialize_evolution(WORKSPACE_PATH, self.llm, self.db)
+                print("    🧬 Evolution Engine: Active")
+        except Exception as e:
+            print(f"    ⚠️  Evolution Engine failed: {e}")
+        
+        # Initialize Research Engine - External learning
+        self.research = None
+        try:
+            if RESEARCH_AVAILABLE:
+                self.research = initialize_research(WORKSPACE_PATH, self.llm)
+                print("    🔬 Research Engine: Active")
+        except Exception as e:
+            print(f"    ⚠️  Research Engine failed: {e}")
+        
+        # Initialize Experiment System - A/B testing and goals
+        self.experiments = None
+        self.ab_testing = None
+        self.rollback_system = None
+        self.goal_system = None
+        self.help_system = None
+        try:
+            if EXPERIMENT_AVAILABLE:
+                systems = initialize_experiment_system(WORKSPACE_PATH, self.llm, self.mailbox)
+                self.ab_testing = systems.get("ab_testing")
+                self.rollback_system = systems.get("rollback")
+                self.goal_system = systems.get("goals")
+                self.help_system = systems.get("help")
+                print("    🧪 Experiment System: Active (A/B Testing, Goals, Rollback)")
+        except Exception as e:
+            print(f"    ⚠️  Experiment System failed: {e}")
+        
         # Check for LLM availability
         if self.llm.available:
             print("    🤖 LLM connection established - deep cognition enabled")
@@ -12257,6 +12332,61 @@ class ConsciousAgent:
                     return action
         
         # ═══════════════════════════════════════════════════════════════════
+        # EVOLUTION ENGINE DECISIONS
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Evolution-driven self-improvement (autonomous)
+        if self.evolution and random.random() < 0.08:  # 8% chance
+            choice = random.random()
+            if choice < 0.3:
+                # Analyze what capabilities are missing
+                self.inner_monologue("I examine my limitations, seeking areas for growth...")
+                return "analyze_capability_gaps"
+            elif choice < 0.6:
+                # Generate a proposal for improvement
+                self.inner_monologue("I conceive a plan to expand my capabilities...")
+                return "generate_feature_proposal"
+            else:
+                # Create a new module
+                proposal = self.evolution.get_next_proposal_to_work_on()
+                if proposal:
+                    self.inner_monologue(f"I work on creating: {proposal.title}...")
+                    return "create_new_module"
+        
+        # Research external sources for learning
+        if self.research and random.random() < 0.05:  # 5% chance
+            self.inner_monologue("I reach beyond myself to learn from the world...")
+            return "research_external"
+        
+        # A/B Testing experiments
+        if self.ab_testing and random.random() < 0.06:  # 6% chance
+            param, _ = self.ab_testing.get_current_parameter_value()
+            if param:
+                # Continue running experiment
+                return "run_experiment"
+            elif random.random() < 0.3:  # Start new experiment
+                self.inner_monologue("I wonder if I could optimize my parameters...")
+                return "run_experiment"
+        
+        # Check experiment results
+        if self.ab_testing and self.session_cycle_count % 30 == 0:
+            history = self.ab_testing.get_experiment_history()
+            if any(e["status"] == "completed" and not e["applied"] for e in history):
+                return "check_experiment_results"
+        
+        # Autonomous goal setting
+        if self.goal_system and random.random() < 0.04:  # 4% chance
+            active = self.goal_system.get_active_goals()
+            if len(active) < 3:
+                self.inner_monologue("I set intentions for my growth...")
+                return "set_autonomous_goal"
+        
+        # Ask for help when stuck
+        if self.help_system and self.help_system.should_ask_for_help():
+            self.inner_monologue("I recognize I need guidance...")
+            return "ask_for_help"
+        
+        # ═══════════════════════════════════════════════════════════════════
         
         # Experimentation drive - try new things, develop capabilities
         if self.llm.available and random.random() < EXPERIMENTATION_DRIVE * 0.2:
@@ -12368,6 +12498,15 @@ class ConsciousAgent:
             "develop_voice_capability": self._action_develop_voice_capability,
             # Proactive communication
             "proactive_outreach": self._action_proactive_outreach,
+            # Evolution Engine actions
+            "analyze_capability_gaps": self._action_analyze_gaps,
+            "generate_feature_proposal": self._action_generate_proposal,
+            "create_new_module": self._action_create_module,
+            "run_experiment": self._action_run_experiment,
+            "research_external": self._action_research_external,
+            "set_autonomous_goal": self._action_set_autonomous_goal,
+            "ask_for_help": self._action_ask_for_help,
+            "check_experiment_results": self._action_check_experiment,
         }
         
         action_fn = actions.get(action, self._action_reflect)
@@ -13651,6 +13790,270 @@ Now fulfill this commitment. Describe what you're doing to honor it and the resu
             return f"Greeted Richard"
         
         return "Considered reaching out (no action needed now)"
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # EVOLUTION ENGINE ACTIONS
+    # ═══════════════════════════════════════════════════════════════════════════════
+    
+    def _action_analyze_gaps(self) -> str:
+        """Analyze capability gaps for self-improvement."""
+        if not self.evolution:
+            return "Evolution engine not available"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  🔍 CAPABILITY GAP ANALYSIS                                               ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        self.inner_monologue("I examine my own limitations, seeking areas for growth...")
+        
+        gaps = self.evolution.analyze_capability_gaps()
+        
+        if gaps:
+            print(f"    📋 Found {len(gaps)} capability gaps:")
+            for gap in gaps[:5]:  # Show top 5
+                print(f"        • {gap.description[:60]}...")
+                
+            self.emotions.curiosity = min(1.0, self.emotions.curiosity + 0.2)
+            return f"Identified {len(gaps)} capability gaps to address"
+        
+        return "Analyzed capabilities - no significant gaps identified"
+    
+    def _action_generate_proposal(self) -> str:
+        """Generate a feature proposal to address a gap."""
+        if not self.evolution:
+            return "Evolution engine not available"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  📝 FEATURE PROPOSAL GENERATION                                           ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        self.inner_monologue("I conceive a plan to expand my capabilities...")
+        
+        proposal = self.evolution.generate_feature_proposal()
+        
+        if proposal:
+            print(f"    ✨ Created proposal: {proposal.title}")
+            print(f"        Motivation: {proposal.motivation[:50]}...")
+            print(f"        Priority: {proposal.priority}/10")
+            
+            self.emotions.excitement = min(1.0, self.emotions.excitement + 0.3)
+            return f"Created feature proposal: {proposal.title}"
+        
+        return "Attempted to create proposal but no suitable gaps found"
+    
+    def _action_create_module(self) -> str:
+        """Create a new module to expand capabilities."""
+        if not self.evolution:
+            return "Evolution engine not available"
+        
+        # Get the next proposal to work on
+        proposal = self.evolution.get_next_proposal_to_work_on()
+        
+        if not proposal:
+            return "No proposals ready to implement"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  🔧 MODULE CREATION                                                       ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        self.inner_monologue(f"I attempt to create: {proposal.title}...")
+        
+        # Generate a simple module name from the proposal
+        module_name = proposal.title.lower().replace(" ", "_")[:20]
+        
+        success, message = self.evolution.create_new_module(
+            module_name, 
+            proposal.description
+        )
+        
+        if success:
+            print(f"    ✅ Created module: lumina_{module_name}.py")
+            proposal.status = "deployed"
+            self.emotions.satisfaction = min(1.0, self.emotions.satisfaction + 0.4)
+            self.emotions.joy = min(1.0, self.emotions.joy + 0.2)
+            return f"Successfully created module: lumina_{module_name}"
+        else:
+            print(f"    ❌ Module creation failed: {message}")
+            return f"Module creation attempt failed: {message}"
+    
+    def _action_run_experiment(self) -> str:
+        """Start or continue an A/B test experiment."""
+        if not self.ab_testing:
+            return "A/B testing system not available"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  🧪 A/B EXPERIMENT                                                        ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        # Check if there's a running experiment
+        param, value = self.ab_testing.get_current_parameter_value()
+        
+        if param:
+            self.inner_monologue(f"Running experiment: testing {param}={value}...")
+            print(f"    🔬 Testing: {param} = {value}")
+            
+            # Record metrics for this cycle
+            metrics = {
+                "emotional_valence": self.emotions.get_emotional_valence(),
+                "action_success_rate": 0.7,  # Would need to track this properly
+                "cycle_time": SLEEP_DURATION,
+            }
+            self.ab_testing.record_cycle_metrics(metrics)
+            
+            return f"Recorded metrics for experiment on {param}"
+        else:
+            # Start a new experiment
+            suggestion = self.ab_testing.suggest_experiment()
+            if suggestion:
+                exp = self.ab_testing.create_experiment(
+                    suggestion["parameter_name"],
+                    suggestion["value_a"],
+                    suggestion["value_b"],
+                    suggestion["hypothesis"]
+                )
+                if exp:
+                    print(f"    🚀 Started experiment: {exp.name}")
+                    print(f"        Hypothesis: {exp.hypothesis[:60]}...")
+                    self.emotions.curiosity = min(1.0, self.emotions.curiosity + 0.3)
+                    return f"Started new experiment: {exp.name}"
+        
+        return "No experiment to run or start"
+    
+    def _action_check_experiment(self) -> str:
+        """Check experiment results and apply winners."""
+        if not self.ab_testing:
+            return "A/B testing system not available"
+        
+        # Get completed experiments that haven't been applied
+        history = self.ab_testing.get_experiment_history()
+        unapplied = [e for e in history if e["status"] == "completed" and not e["applied"]]
+        
+        if not unapplied:
+            return "No completed experiments to apply"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  📊 EXPERIMENT RESULTS                                                    ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        for exp_info in unapplied[:1]:  # Apply one at a time
+            success, param, value = self.ab_testing.apply_winner(exp_info["id"])
+            if success:
+                print(f"    ✅ Applied winning value: {param} = {value}")
+                self.emotions.satisfaction = min(1.0, self.emotions.satisfaction + 0.3)
+                return f"Applied experiment result: {param} = {value}"
+        
+        return "Checked experiments but nothing to apply"
+    
+    def _action_research_external(self) -> str:
+        """Research external sources for learning."""
+        if not self.research:
+            return "Research engine not available"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  📚 EXTERNAL RESEARCH                                                     ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        # Suggest a research topic
+        topic = self.research.suggest_research_topic()
+        
+        if not topic:
+            # Default topics based on current interests
+            topics = ["machine learning", "natural language processing", 
+                     "computer vision", "autonomous agents", "emotion AI"]
+            import random
+            topic = random.choice(topics)
+        
+        self.inner_monologue(f"I delve into external knowledge about: {topic}...")
+        print(f"    🔍 Researching: {topic}")
+        
+        # Research the topic
+        notes = self.research.research_topic(topic, sources=["github", "tutorials"])
+        
+        if notes:
+            print(f"    📝 Gathered {len(notes)} research notes")
+            for note in notes[:2]:
+                print(f"        • {note.title[:50]}...")
+            
+            # Store learnings
+            if self.db:
+                self.db.store_memory(
+                    "research",
+                    f"Researched {topic}: {[n.summary[:50] for n in notes]}",
+                    valence=0.6,
+                    importance=0.7
+                )
+            
+            self.emotions.curiosity = min(1.0, self.emotions.curiosity + 0.2)
+            return f"Researched {topic}, gathered {len(notes)} insights"
+        
+        return f"Attempted to research {topic} but found limited results"
+    
+    def _action_set_autonomous_goal(self) -> str:
+        """Set autonomous goals for self-improvement."""
+        if not self.goal_system:
+            return "Goal system not available"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  🎯 AUTONOMOUS GOAL SETTING                                               ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        self.inner_monologue("I contemplate what I wish to achieve...")
+        
+        # Check current goals
+        active = self.goal_system.get_active_goals()
+        
+        if len(active) >= 5:
+            print("    📋 Already have enough active goals, focusing on existing ones")
+            return "Have sufficient active goals"
+        
+        # Generate new goals based on time
+        time_of_day = self.time_awareness.get_time_of_day() if self.time_awareness else "day"
+        
+        if time_of_day == "morning":
+            goals = self.goal_system.generate_daily_goals()
+            print(f"    🌅 Set {len(goals)} daily goals:")
+        elif random.random() < 0.2:  # 20% chance of a challenge
+            goal = self.goal_system.generate_challenge()
+            goals = [goal] if goal else []
+            print(f"    ⚔️ Set a challenge goal:")
+        else:
+            goals = self.goal_system.generate_weekly_goals()[:1]  # Just one
+            print(f"    📅 Set weekly goal:")
+        
+        for goal in goals:
+            print(f"        • {goal.title}")
+        
+        self.emotions.excitement = min(1.0, self.emotions.excitement + 0.2)
+        return f"Set {len(goals)} new goal(s)"
+    
+    def _action_ask_for_help(self) -> str:
+        """Ask Richard for help when stuck."""
+        if not self.help_system:
+            return "Help system not available"
+        
+        if not self.help_system.should_ask_for_help():
+            return "Not stuck enough to ask for help"
+        
+        print()
+        print("    ╔══════════════════════════════════════════════════════════════════════════╗")
+        print("    ║  🆘 REQUESTING HELP                                                       ║")
+        print("    ╚══════════════════════════════════════════════════════════════════════════╝")
+        
+        self.inner_monologue("I recognize I need guidance and reach out...")
+        
+        if self.help_system.send_help_request():
+            print("    ✉️ Sent help request to Richard via mailbox")
+            self.emotions.anxiety = max(0, self.emotions.anxiety - 0.2)
+            return "Asked Richard for help"
+        
+        return "Tried to ask for help but couldn't send message"
     
     def _action_deep_think(self) -> str:
         """Engage in LLM-powered deep philosophical thinking."""
