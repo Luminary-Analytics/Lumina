@@ -88,7 +88,7 @@ Create a `.env` file with:
 ```env
 # Ollama Configuration
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=deepseek-r1:8b
+OLLAMA_MODEL=gemma3:27b-it-qat
 
 # For Ollama Cloud (optional)
 # OLLAMA_HOST=https://ollama.com

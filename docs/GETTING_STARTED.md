@@ -70,9 +70,9 @@ curl -fsSL https://ollama.ai/install.sh | sh
 ### 5. Pull an LLM Model
 
 ```bash
-ollama pull deepseek-r1:8b
-# or
-ollama pull llama3.2:latest
+ollama pull gemma3:27b-it-qat
+# or for smaller systems:
+ollama pull gemma3:12b
 ```
 
 ### 6. Configure Environment
@@ -86,7 +86,7 @@ Edit `.env`:
 ```ini
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_API_KEY=
-OLLAMA_MODEL=deepseek-r1:8b
+OLLAMA_MODEL=gemma3:27b-it-qat
 ```
 
 For Ollama Cloud:
