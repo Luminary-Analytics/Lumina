@@ -70,9 +70,11 @@ curl -fsSL https://ollama.ai/install.sh | sh
 ### 5. Pull an LLM Model
 
 ```bash
-ollama pull gemma3:27b-it-qat
-# or for smaller systems:
-ollama pull gemma3:12b
+# For cloud model (requires Ollama account):
+# gemini-3-pro-preview (no pull needed - cloud model)
+
+# For local models:
+ollama pull llama3.2:latest
 ```
 
 ### 6. Configure Environment
@@ -86,7 +88,7 @@ Edit `.env`:
 ```ini
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_API_KEY=
-OLLAMA_MODEL=gemma3:27b-it-qat
+OLLAMA_MODEL=gemini-3-pro-preview
 ```
 
 For Ollama Cloud:

@@ -88,7 +88,7 @@ Create a `.env` file with:
 ```env
 # Ollama Configuration
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=gemma3:27b-it-qat
+OLLAMA_MODEL=gemini-3-pro-preview
 
 # For Ollama Cloud (optional)
 # OLLAMA_HOST=https://ollama.com
